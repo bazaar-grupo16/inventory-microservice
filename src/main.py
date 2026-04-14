@@ -1,5 +1,5 @@
 """
-Bazaar Microservice — Application entry-point.
+Bazaar Inventory Service — Application entry-point.
 
 Creates the FastAPI application, registers routers, and configures
 structured logging.  Database tables are created on startup via the
@@ -8,15 +8,19 @@ production).
 """
 
 import logging
-from contextlib import asynccontextmanager
+import time
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 
+from src.api.exception_handlers import register_exception_handlers
 from src.api.health import router as health_router
+from src.api.routers.stock import router as stock_router
 from src.core.config import get_settings
 from src.core.database import Base, engine, wait_for_db
 from src.core.logging import setup_logging
+from src.models import Stock  # noqa: F401
 
 
 settings = get_settings()
@@ -28,9 +32,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Application startup / shutdown lifecycle hook."""
     setup_logging()
     logger.info("Starting %s", settings.APP_NAME)
-    # Wait for the database before creating tables.
     wait_for_db()
-    # Create tables (dev convenience — use Alembic in production).
     Base.metadata.create_all(bind=engine)
     yield
     logger.info("Shutting down %s", settings.APP_NAME)
@@ -43,5 +45,26 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+
+@app.middleware("http")
+async def logging_middleware(request: Request, call_next) -> Response:  # type: ignore[type-arg]
+    """Log method, path, status code and duration for every request."""
+    start = time.monotonic()
+    response: Response = await call_next(request)
+    duration_ms = (time.monotonic() - start) * 1000
+    logger.info(
+        "%s %s %d %.1fms",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
+    return response
+
+
 # ── Routers ──────────────────────────────────────────
 app.include_router(health_router)
+app.include_router(stock_router)
+
+# ── Exception handlers ────────────────────────────────
+register_exception_handlers(app)
