@@ -12,6 +12,7 @@ on:
       - "Dockerfile.test"
       - "docker-compose.test.yml"
       - "requirements.txt"
+      - "pyproject.toml"
   pull_request:
     branches: [dev]
 
