@@ -1,16 +1,16 @@
 # ──────────────────────────────────────────────────────────────
-# Kubernetes Service — Bazaar Microservice
+# Kubernetes Service — Inventory Microservice
 # ──────────────────────────────────────────────────────────────
 apiVersion: v1
 kind: Service
 metadata:
-  name: template-service
+  name: inventory-service
   labels:
-    app: template-service
+    app: inventory-service
 spec:
   type: ClusterIP
   selector:
-    app: template-service
+    app: inventory-service
   ports:
     - protocol: TCP
       port: 80
