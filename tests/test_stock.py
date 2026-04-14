@@ -123,9 +123,7 @@ class TestGetStock:
 class TestGetStocksBatch:
     """Batch query stock levels for multiple products."""
 
-    def test_returns_quantities_for_all_requested_ids(
-        self, client: TestClient
-    ) -> None:
+    def test_returns_quantities_for_all_requested_ids(self, client: TestClient) -> None:
         pid_a, _ = register(client, quantity=5)
         pid_b, _ = register(client, quantity=15)
 
@@ -215,9 +213,7 @@ class TestUpdateStock:
 class TestReserveStock:
     """Atomic stock reservation for the checkout flow."""
 
-    def test_decrements_stock_by_requested_quantity(
-        self, client: TestClient
-    ) -> None:
+    def test_decrements_stock_by_requested_quantity(self, client: TestClient) -> None:
         pid, _ = register(client, quantity=10)
 
         response = client.post(
@@ -228,9 +224,7 @@ class TestReserveStock:
         assert response.status_code == 200
         assert response.json()["data"]["quantity"] == 7
 
-    def test_allows_reserving_all_remaining_stock(
-        self, client: TestClient
-    ) -> None:
+    def test_allows_reserving_all_remaining_stock(self, client: TestClient) -> None:
         pid, _ = register(client, quantity=5)
 
         response = client.post(
@@ -241,9 +235,7 @@ class TestReserveStock:
         assert response.status_code == 200
         assert response.json()["data"]["quantity"] == 0
 
-    def test_returns_409_when_stock_is_insufficient(
-        self, client: TestClient
-    ) -> None:
+    def test_returns_409_when_stock_is_insufficient(self, client: TestClient) -> None:
         pid, _ = register(client, quantity=2)
 
         response = client.post(
@@ -287,9 +279,7 @@ class TestReserveStock:
 
         assert response.status_code == 422
 
-    def test_stock_unchanged_after_failed_reservation(
-        self, client: TestClient
-    ) -> None:
+    def test_stock_unchanged_after_failed_reservation(self, client: TestClient) -> None:
         pid, _ = register(client, quantity=2)
         client.post(
             f"/internal/products/{pid}/stock/reserve",
@@ -307,9 +297,7 @@ class TestReserveStock:
 class TestReleaseStock:
     """Restore reserved stock on order cancellation."""
 
-    def test_increments_stock_by_released_quantity(
-        self, client: TestClient
-    ) -> None:
+    def test_increments_stock_by_released_quantity(self, client: TestClient) -> None:
         pid, _ = register(client, quantity=10)
         client.post(
             f"/internal/products/{pid}/stock/reserve",

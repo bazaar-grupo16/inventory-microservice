@@ -51,10 +51,10 @@ def check_db_connection() -> bool:
 
 
 # ── Retry / backoff knobs ─────────────────────────────────────
-_DB_INITIAL_WAIT: float = 1.0    # seconds before the first retry
+_DB_INITIAL_WAIT: float = 1.0  # seconds before the first retry
 _DB_BACKOFF_FACTOR: float = 2.0  # multiplier applied after each failure
-_DB_MAX_WAIT: float = 30.0       # ceiling for a single sleep interval
-_DB_TIMEOUT: float = 300.0       # total budget — give up after this many seconds
+_DB_MAX_WAIT: float = 30.0  # ceiling for a single sleep interval
+_DB_TIMEOUT: float = 300.0  # total budget — give up after this many seconds
 
 
 def wait_for_db() -> None:

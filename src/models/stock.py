@@ -20,9 +20,7 @@ class Stock(Base):
 
     __tablename__ = "stocks"
 
-    __table_args__ = (
-        CheckConstraint("quantity >= 0", name="quantity_non_negative"),
-    )
+    __table_args__ = (CheckConstraint("quantity >= 0", name="quantity_non_negative"),)
 
     product_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),

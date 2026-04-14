@@ -21,6 +21,4 @@ class InsufficientStock(Exception):
     def __init__(self, product_id: UUID, available: int) -> None:
         self.product_id = product_id
         self.available = available
-        super().__init__(
-            f"Product {product_id} has only {available} units available."
-        )
+        super().__init__(f"Product {product_id} has only {available} units available.")
