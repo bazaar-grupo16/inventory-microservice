@@ -4,11 +4,13 @@ Database queries for stock entities.
 
 from __future__ import annotations
 
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
 
+from src.dtos import StockQuantityChangeDTO
 from src.models.stock import Stock
 
 
@@ -40,6 +42,19 @@ class StockRepository:
         self.db.refresh(stock)
         return stock
 
+    def save_with_previous_quantity(
+        self, stock: Stock, previous_quantity: int
+    ) -> StockQuantityChangeDTO:
+        """Persist a stock change and return both the old and new quantities."""
+        self.db.add(stock)
+        self.db.commit()
+        self.db.refresh(stock)
+        return StockQuantityChangeDTO(
+            product_id=stock.product_id,
+            previous_quantity=previous_quantity,
+            new_quantity=stock.quantity,
+        )
+
     def delete(self, stock: Stock) -> None:
         """Delete a stock entry from the database."""
         self.db.delete(stock)
@@ -51,12 +66,15 @@ class StockRepository:
         rows = self.db.scalars(query).all()
         return {row.product_id: row.quantity for row in rows}
 
-    def reserve(self, product_id: UUID, quantity: int) -> bool:
+    def reserve(
+        self, product_id: UUID, quantity: int
+    ) -> StockQuantityChangeDTO | None:
         """Atomically decrement stock by quantity.
 
         Uses a single UPDATE … WHERE quantity >= :qty to prevent concurrent
-        over-reservations.  Returns True if a row was updated, False if the
-        stock was insufficient (or the entry does not exist).
+        over-reservations. Returns both the old and new quantity if the row
+        was updated, or ``None`` if the stock was insufficient (or the entry
+        does not exist).
         """
         stmt = (
             update(Stock)
@@ -65,8 +83,17 @@ class StockRepository:
                 quantity=Stock.quantity - quantity,
                 updated_at=text("NOW()"),
             )
+            .returning(Stock.quantity)
             .execution_options(synchronize_session="fetch")
         )
         result = self.db.execute(stmt)
+        new_quantity = cast(int | None, result.scalar_one_or_none())
         self.db.commit()
-        return result.rowcount > 0
+        if new_quantity is None:
+            return None
+
+        return StockQuantityChangeDTO(
+            product_id=product_id,
+            previous_quantity=new_quantity + quantity,
+            new_quantity=new_quantity,
+        )
