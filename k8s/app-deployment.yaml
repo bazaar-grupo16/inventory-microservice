@@ -26,6 +26,11 @@ spec:
             - containerPort: 8000
           # ── Environment from Kubernetes Secret ──────
           env:
+            - name: CATALOG_SERVICE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: inventory-db-credentials
+                  key: CATALOG_SERVICE_URL
             - name: DB_HOST
               valueFrom:
                 secretKeyRef:

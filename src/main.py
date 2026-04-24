@@ -32,6 +32,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Application startup / shutdown lifecycle hook."""
     setup_logging()
     logger.info("Starting %s", settings.APP_NAME)
+    if not settings.CATALOG_SERVICE_URL:
+        logger.warning(
+            "CATALOG_SERVICE_URL is empty; catalog stock-status notifications are disabled"
+        )
     wait_for_db()
     Base.metadata.create_all(bind=engine)
     yield

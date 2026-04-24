@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # ── Application ──────────────────────────────────
     APP_NAME: str = "inventory-service"
     LOG_LEVEL: str = "info"
+    CATALOG_SERVICE_URL: str = ""
 
     # ── Database ─────────────────────────────────────
     DB_HOST: str
