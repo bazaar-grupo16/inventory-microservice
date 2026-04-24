@@ -85,6 +85,18 @@ El microservicio se despliega automáticamente en DigitalOcean Kubernetes (DOKS)
 
 Este servicio es **interno** — no está expuesto a través del gateway público. Es consumido por otros microservicios de la plataforma directamente dentro del cluster.
 
+### Configuración interna entre microservicios
+
+`CATALOG_SERVICE_URL` define la URL base interna de `catalog-microservice` para los callbacks de stock que hace inventory cuando un producto cruza el umbral de stock `0`.
+
+En Kubernetes, el valor esperado dentro del cluster es:
+
+```txt
+http://catalog-service
+```
+
+Ese valor apunta al `Service` interno de catalog en `bazaar-dev` y se usa solo para tráfico interno entre microservicios. No debe reemplazarse por una URL pública de Ingress o gateway.
+
 ## Endpoints
 
 ### Health

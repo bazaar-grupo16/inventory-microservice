@@ -16,6 +16,7 @@ from src.dtos import (
     UpdateStockDTO,
 )
 from src.repositories.stock import StockRepository
+from src.services.catalog import CatalogService
 from src.schemas.stock import (
     BatchStocksRequest,
     BatchStocksResponse,
@@ -35,6 +36,7 @@ class StockController:
     def __init__(self, db: Session) -> None:
         self.service = StockService(
             repository=StockRepository(db),
+            catalog_service=CatalogService(),
         )
 
     def register_stock(

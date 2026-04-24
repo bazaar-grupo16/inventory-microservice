@@ -7,6 +7,7 @@ The database is provided by docker-compose.test.yml.
 
 from __future__ import annotations
 
+from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -344,3 +345,116 @@ class TestReleaseStock:
         )
 
         assert response.status_code == 422
+
+
+class TestCatalogNotifications:
+    """Catalog notifications are emitted only on zero-threshold crossings."""
+
+    def test_reserve_to_zero_notifies_no_stock(self, client: TestClient) -> None:
+        pid, _ = register(client, quantity=5)
+
+        with patch("src.services.catalog.CatalogService.notify_stock_status") as notify:
+            response = client.post(
+                f"/internal/products/{pid}/stock/reserve",
+                json={"quantity": 5},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["quantity"] == 0
+        notify.assert_called_once_with(pid, has_stock=False)
+
+    def test_reserve_above_zero_does_not_notify(self, client: TestClient) -> None:
+        pid, _ = register(client, quantity=5)
+
+        with patch("src.services.catalog.CatalogService.notify_stock_status") as notify:
+            response = client.post(
+                f"/internal/products/{pid}/stock/reserve",
+                json={"quantity": 2},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["quantity"] == 3
+        notify.assert_not_called()
+
+    def test_release_from_zero_notifies_has_stock(self, client: TestClient) -> None:
+        pid, _ = register(client, quantity=0)
+
+        with patch("src.services.catalog.CatalogService.notify_stock_status") as notify:
+            response = client.post(
+                f"/internal/products/{pid}/stock/release",
+                json={"quantity": 4},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["quantity"] == 4
+        notify.assert_called_once_with(pid, has_stock=True)
+
+    def test_release_above_zero_does_not_notify(self, client: TestClient) -> None:
+        pid, _ = register(client, quantity=3)
+
+        with patch("src.services.catalog.CatalogService.notify_stock_status") as notify:
+            response = client.post(
+                f"/internal/products/{pid}/stock/release",
+                json={"quantity": 2},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["quantity"] == 5
+        notify.assert_not_called()
+
+    def test_update_to_zero_notifies_no_stock(self, client: TestClient) -> None:
+        pid, _ = register(client, quantity=3)
+
+        with patch("src.services.catalog.CatalogService.notify_stock_status") as notify:
+            response = client.put(
+                f"/internal/products/{pid}/stock",
+                json={"quantity": 0},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["quantity"] == 0
+        notify.assert_called_once_with(pid, has_stock=False)
+
+    def test_update_from_zero_notifies_has_stock(self, client: TestClient) -> None:
+        pid, _ = register(client, quantity=0)
+
+        with patch("src.services.catalog.CatalogService.notify_stock_status") as notify:
+            response = client.put(
+                f"/internal/products/{pid}/stock",
+                json={"quantity": 5},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["quantity"] == 5
+        notify.assert_called_once_with(pid, has_stock=True)
+
+    def test_update_nonzero_to_nonzero_does_not_notify(
+        self, client: TestClient
+    ) -> None:
+        pid, _ = register(client, quantity=3)
+
+        with patch("src.services.catalog.CatalogService.notify_stock_status") as notify:
+            response = client.put(
+                f"/internal/products/{pid}/stock",
+                json={"quantity": 5},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["quantity"] == 5
+        notify.assert_not_called()
+
+    def test_catalog_failure_does_not_fail_reserve(self, client: TestClient) -> None:
+        pid, _ = register(client, quantity=5)
+
+        with patch(
+            "src.services.catalog.CatalogService.notify_stock_status",
+            side_effect=RuntimeError("catalog unavailable"),
+        ) as notify:
+            response = client.post(
+                f"/internal/products/{pid}/stock/reserve",
+                json={"quantity": 5},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["quantity"] == 0
+        notify.assert_called_once_with(pid, has_stock=False)

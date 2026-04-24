@@ -8,6 +8,7 @@ the exception handlers registered in main.py.
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from src.dtos import (
@@ -15,18 +16,26 @@ from src.dtos import (
     RegisterStockDTO,
     ReleaseStockDTO,
     ReserveStockDTO,
+    StockQuantityChangeDTO,
     UpdateStockDTO,
 )
 from src.exceptions.stock import InsufficientStock, StockNotFound
 from src.models.stock import Stock
 from src.repositories.stock import StockRepository
+from src.services.catalog import CatalogService
+
+
+logger = logging.getLogger(__name__)
 
 
 class StockService:
     """Pure business logic — no SQLAlchemy imports, no HTTP awareness."""
 
-    def __init__(self, repository: StockRepository) -> None:
+    def __init__(
+        self, repository: StockRepository, catalog_service: CatalogService
+    ) -> None:
         self.repository = repository
+        self.catalog_service = catalog_service
 
     def register_stock(self, dto: RegisterStockDTO) -> Stock:
         """Create the initial stock entry for a newly created product."""
@@ -56,13 +65,16 @@ class StockService:
         stock = self.repository.find_by_id(dto.product_id)
         if stock is None:
             raise StockNotFound(dto.product_id)
+        previous_quantity = stock.quantity
         stock.quantity = dto.quantity
-        return self.repository.save(stock)
+        change = self.repository.save_with_previous_quantity(stock, previous_quantity)
+        self._notify_update_stock(change)
+        return stock
 
     def reserve_stock(self, dto: ReserveStockDTO) -> Stock:
         """Atomically decrement stock; raise InsufficientStock if not possible."""
-        succeeded = self.repository.reserve(dto.product_id, dto.quantity)
-        if not succeeded:
+        change = self.repository.reserve(dto.product_id, dto.quantity)
+        if change is None:
             # Could be not found or insufficient — distinguish for the caller.
             stock = self.repository.find_by_id(dto.product_id)
             if stock is None:
@@ -70,6 +82,7 @@ class StockService:
             raise InsufficientStock(dto.product_id, stock.quantity)
         stock = self.repository.find_by_id(dto.product_id)
         assert stock is not None  # just committed
+        self._notify_reserve_stock(change)
         return stock
 
     def release_stock(self, dto: ReleaseStockDTO) -> Stock:
@@ -77,5 +90,32 @@ class StockService:
         stock = self.repository.find_by_id(dto.product_id)
         if stock is None:
             raise StockNotFound(dto.product_id)
+        previous_quantity = stock.quantity
         stock.quantity += dto.quantity
-        return self.repository.save(stock)
+        change = self.repository.save_with_previous_quantity(stock, previous_quantity)
+        self._notify_release_stock(change)
+        return stock
+
+    def _notify_reserve_stock(self, change: StockQuantityChangeDTO) -> None:
+        if change.new_quantity == 0:
+            self._notify_catalog_stock_status(change.product_id, has_stock=False)
+
+    def _notify_release_stock(self, change: StockQuantityChangeDTO) -> None:
+        if change.previous_quantity == 0 and change.new_quantity > 0:
+            self._notify_catalog_stock_status(change.product_id, has_stock=True)
+
+    def _notify_update_stock(self, change: StockQuantityChangeDTO) -> None:
+        if change.previous_quantity > 0 and change.new_quantity == 0:
+            self._notify_catalog_stock_status(change.product_id, has_stock=False)
+        elif change.previous_quantity == 0 and change.new_quantity > 0:
+            self._notify_catalog_stock_status(change.product_id, has_stock=True)
+
+    def _notify_catalog_stock_status(self, product_id: UUID, has_stock: bool) -> None:
+        try:
+            self.catalog_service.notify_stock_status(product_id, has_stock=has_stock)
+        except Exception as exc:
+            logger.warning(
+                "CatalogService raised unexpectedly for product %s: %s",
+                product_id,
+                exc,
+            )
