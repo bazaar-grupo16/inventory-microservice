@@ -13,13 +13,21 @@ from uuid import UUID
 
 from src.dtos import (
     BatchStocksDTO,
+    BatchStockQuantityRequestDTO,
     RegisterStockDTO,
     ReleaseStockDTO,
     ReserveStockDTO,
+    StockQuantityRequestDTO,
     StockQuantityChangeDTO,
     UpdateStockDTO,
 )
-from src.exceptions.stock import InsufficientStock, StockNotFound
+from src.exceptions.stock import (
+    BatchInsufficientStock,
+    BatchStockIssue,
+    BatchStockNotFound,
+    InsufficientStock,
+    StockNotFound,
+)
 from src.models.stock import Stock
 from src.repositories.stock import StockRepository
 from src.services.catalog import CatalogService
@@ -96,6 +104,48 @@ class StockService:
         self._notify_release_stock(change)
         return stock
 
+    def reserve_stocks(self, dto: BatchStockQuantityRequestDTO) -> dict[UUID, int]:
+        """Atomically reserve stock for multiple products in one transaction."""
+        requested_quantities = self._collapse_requested_quantities(dto.items)
+        stocks = self.repository.find_by_ids_for_update(list(requested_quantities))
+        issues = self._collect_reservation_issues(requested_quantities, stocks)
+        if issues:
+            raise BatchInsufficientStock(issues)
+
+        stock_changes: list[tuple[Stock, int]] = []
+        for product_id, quantity in requested_quantities.items():
+            stock = stocks[product_id]
+            previous_quantity = stock.quantity
+            stock.quantity -= quantity
+            stock_changes.append((stock, previous_quantity))
+
+        changes = self.repository.save_many_with_previous_quantities(stock_changes)
+        for change in changes:
+            self._notify_reserve_stock(change)
+        return {change.product_id: change.new_quantity for change in changes}
+
+    def release_stocks(self, dto: BatchStockQuantityRequestDTO) -> dict[UUID, int]:
+        """Restore reserved stock for multiple products in one transaction."""
+        requested_quantities = self._collapse_requested_quantities(dto.items)
+        stocks = self.repository.find_by_ids_for_update(list(requested_quantities))
+        missing_product_ids = [
+            product_id for product_id in requested_quantities if product_id not in stocks
+        ]
+        if missing_product_ids:
+            raise BatchStockNotFound(missing_product_ids)
+
+        stock_changes: list[tuple[Stock, int]] = []
+        for product_id, quantity in requested_quantities.items():
+            stock = stocks[product_id]
+            previous_quantity = stock.quantity
+            stock.quantity += quantity
+            stock_changes.append((stock, previous_quantity))
+
+        changes = self.repository.save_many_with_previous_quantities(stock_changes)
+        for change in changes:
+            self._notify_release_stock(change)
+        return {change.product_id: change.new_quantity for change in changes}
+
     def _notify_reserve_stock(self, change: StockQuantityChangeDTO) -> None:
         if change.new_quantity == 0:
             self._notify_catalog_stock_status(change.product_id, has_stock=False)
@@ -119,3 +169,30 @@ class StockService:
                 product_id,
                 exc,
             )
+
+    def _collapse_requested_quantities(
+        self, items: list[StockQuantityRequestDTO]
+    ) -> dict[UUID, int]:
+        collapsed: dict[UUID, int] = {}
+        for item in items:
+            collapsed[item.product_id] = collapsed.get(item.product_id, 0) + item.quantity
+        return collapsed
+
+    def _collect_reservation_issues(
+        self,
+        requested_quantities: dict[UUID, int],
+        stocks: dict[UUID, Stock],
+    ) -> list[BatchStockIssue]:
+        issues: list[BatchStockIssue] = []
+        for product_id, requested_quantity in requested_quantities.items():
+            stock = stocks.get(product_id)
+            available_quantity = stock.quantity if stock is not None else 0
+            if stock is None or available_quantity < requested_quantity:
+                issues.append(
+                    BatchStockIssue(
+                        product_id=product_id,
+                        requested=requested_quantity,
+                        available=available_quantity,
+                    )
+                )
+        return issues

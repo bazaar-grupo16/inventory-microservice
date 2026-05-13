@@ -37,6 +37,17 @@ class ReleaseStockDTO:
 
 
 @dataclass
+class StockQuantityRequestDTO:
+    product_id: UUID
+    quantity: int
+
+
+@dataclass
+class BatchStockQuantityRequestDTO:
+    items: list[StockQuantityRequestDTO]
+
+
+@dataclass
 class StockQuantityChangeDTO:
     product_id: UUID
     previous_quantity: int

@@ -55,6 +55,24 @@ class StockRepository:
             new_quantity=stock.quantity,
         )
 
+    def save_many_with_previous_quantities(
+        self, stock_changes: list[tuple[Stock, int]]
+    ) -> list[StockQuantityChangeDTO]:
+        """Persist multiple stock changes in a single transaction."""
+        for stock, _previous_quantity in stock_changes:
+            self.db.add(stock)
+        self.db.commit()
+        for stock, _previous_quantity in stock_changes:
+            self.db.refresh(stock)
+        return [
+            StockQuantityChangeDTO(
+                product_id=stock.product_id,
+                previous_quantity=previous_quantity,
+                new_quantity=stock.quantity,
+            )
+            for stock, previous_quantity in stock_changes
+        ]
+
     def delete(self, stock: Stock) -> None:
         """Delete a stock entry from the database."""
         self.db.delete(stock)
@@ -65,6 +83,12 @@ class StockRepository:
         query = select(Stock).where(Stock.product_id.in_(product_ids))
         rows = self.db.scalars(query).all()
         return {row.product_id: row.quantity for row in rows}
+
+    def find_by_ids_for_update(self, product_ids: list[UUID]) -> dict[UUID, Stock]:
+        """Fetch stock rows and lock them for update inside the current transaction."""
+        query = select(Stock).where(Stock.product_id.in_(product_ids)).with_for_update()
+        rows = self.db.scalars(query).all()
+        return {row.product_id: row for row in rows}
 
     def reserve(
         self, product_id: UUID, quantity: int

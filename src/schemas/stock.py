@@ -38,6 +38,11 @@ class ReleaseStockRequest(BaseModel):
     quantity: int = Field(ge=1)
 
 
+class BatchStockChangeRequest(BaseModel):
+    product_id: UUID
+    quantity: int = Field(ge=1)
+
+
 class BatchStocksRequest(BaseModel):
     product_ids: list[UUID] = Field(min_length=1)
 

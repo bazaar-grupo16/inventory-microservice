@@ -10,9 +10,11 @@ from sqlalchemy.orm import Session
 
 from src.dtos import (
     BatchStocksDTO,
+    BatchStockQuantityRequestDTO,
     RegisterStockDTO,
     ReleaseStockDTO,
     ReserveStockDTO,
+    StockQuantityRequestDTO,
     UpdateStockDTO,
 )
 from src.repositories.stock import StockRepository
@@ -20,6 +22,7 @@ from src.services.catalog import CatalogService
 from src.schemas.stock import (
     BatchStocksRequest,
     BatchStocksResponse,
+    BatchStockChangeRequest,
     RegisterStockRequest,
     ReleaseStockRequest,
     ReserveStockRequest,
@@ -78,3 +81,27 @@ class StockController:
         dto = ReleaseStockDTO(product_id=product_id, quantity=payload.quantity)
         stock = self.service.release_stock(dto)
         return StockResponse(data=stock)
+
+    def reserve_stocks(
+        self, payload: list[BatchStockChangeRequest]
+    ) -> BatchStocksResponse:
+        dto = BatchStockQuantityRequestDTO(
+            items=[
+                StockQuantityRequestDTO(product_id=item.product_id, quantity=item.quantity)
+                for item in payload
+            ]
+        )
+        stocks = self.service.reserve_stocks(dto)
+        return BatchStocksResponse(data={str(k): v for k, v in stocks.items()})
+
+    def release_stocks(
+        self, payload: list[BatchStockChangeRequest]
+    ) -> BatchStocksResponse:
+        dto = BatchStockQuantityRequestDTO(
+            items=[
+                StockQuantityRequestDTO(product_id=item.product_id, quantity=item.quantity)
+                for item in payload
+            ]
+        )
+        stocks = self.service.release_stocks(dto)
+        return BatchStocksResponse(data={str(k): v for k, v in stocks.items()})
