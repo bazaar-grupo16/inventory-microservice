@@ -10,6 +10,7 @@ from uuid import UUID
 import httpx
 
 from src.core.config import get_settings
+from src.core.observability import build_observability_headers
 
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class CatalogService:
             response = httpx.patch(
                 url,
                 json={"has_stock": has_stock},
+                headers=build_observability_headers(),
                 timeout=3.0,
             )
             response.raise_for_status()
