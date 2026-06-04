@@ -19,6 +19,7 @@ from src.dtos import (
     ReserveStockDTO,
     StockQuantityRequestDTO,
     StockQuantityChangeDTO,
+    StockNotificationMetadataDTO,
     UpdateStockDTO,
 )
 from src.exceptions.stock import (
@@ -31,6 +32,7 @@ from src.exceptions.stock import (
 from src.models.stock import Stock
 from src.repositories.stock import StockRepository
 from src.services.catalog import CatalogService
+from src.services.notifications import NotificationsService
 
 
 logger = logging.getLogger(__name__)
@@ -40,10 +42,14 @@ class StockService:
     """Pure business logic — no SQLAlchemy imports, no HTTP awareness."""
 
     def __init__(
-        self, repository: StockRepository, catalog_service: CatalogService
+        self,
+        repository: StockRepository,
+        catalog_service: CatalogService,
+        notifications_service: NotificationsService,
     ) -> None:
         self.repository = repository
         self.catalog_service = catalog_service
+        self.notifications_service = notifications_service
 
     def register_stock(self, dto: RegisterStockDTO) -> Stock:
         """Create the initial stock entry for a newly created product."""
@@ -77,6 +83,7 @@ class StockService:
         stock.quantity = dto.quantity
         change = self.repository.save_with_previous_quantity(stock, previous_quantity)
         self._notify_update_stock(change)
+        self._notify_stock_threshold_crossing(change, dto.notification_metadata)
         return stock
 
     def reserve_stock(self, dto: ReserveStockDTO) -> Stock:
@@ -91,6 +98,7 @@ class StockService:
         stock = self.repository.find_by_id(dto.product_id)
         assert stock is not None  # just committed
         self._notify_reserve_stock(change)
+        self._notify_stock_threshold_crossing(change, dto.notification_metadata)
         return stock
 
     def release_stock(self, dto: ReleaseStockDTO) -> Stock:
@@ -120,8 +128,17 @@ class StockService:
             stock_changes.append((stock, previous_quantity))
 
         changes = self.repository.save_many_with_previous_quantities(stock_changes)
+        metadata_by_product_id = {
+            item.product_id: item.notification_metadata
+            for item in dto.items
+            if item.notification_metadata is not None
+        }
         for change in changes:
             self._notify_reserve_stock(change)
+            self._notify_stock_threshold_crossing(
+                change,
+                metadata_by_product_id.get(change.product_id),
+            )
         return {change.product_id: change.new_quantity for change in changes}
 
     def release_stocks(self, dto: BatchStockQuantityRequestDTO) -> dict[UUID, int]:
@@ -167,6 +184,40 @@ class StockService:
             logger.warning(
                 "CatalogService raised unexpectedly for product %s: %s",
                 product_id,
+                exc,
+            )
+
+    def _notify_stock_threshold_crossing(
+        self,
+        change: StockQuantityChangeDTO,
+        metadata: StockNotificationMetadataDTO | None,
+    ) -> None:
+        if metadata is None:
+            return
+
+        threshold = self.notifications_service.settings.LOW_STOCK_THRESHOLD
+        try:
+            if change.previous_quantity > 0 and change.new_quantity == 0:
+                self.notifications_service.notify_out_of_stock(
+                    seller_id=metadata.seller_id,
+                    product_id=change.product_id,
+                    product_name=metadata.product_name,
+                )
+            elif (
+                change.previous_quantity >= threshold
+                and change.new_quantity < threshold
+            ):
+                self.notifications_service.notify_low_stock(
+                    seller_id=metadata.seller_id,
+                    product_id=change.product_id,
+                    product_name=metadata.product_name,
+                    current_stock=change.new_quantity,
+                    threshold=threshold,
+                )
+        except Exception as exc:
+            logger.warning(
+                "NotificationsService raised unexpectedly for product %s: %s",
+                change.product_id,
                 exc,
             )
 
