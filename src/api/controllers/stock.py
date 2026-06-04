@@ -14,11 +14,13 @@ from src.dtos import (
     RegisterStockDTO,
     ReleaseStockDTO,
     ReserveStockDTO,
+    StockNotificationMetadataDTO,
     StockQuantityRequestDTO,
     UpdateStockDTO,
 )
 from src.repositories.stock import StockRepository
 from src.services.catalog import CatalogService
+from src.services.notifications import NotificationsService
 from src.schemas.stock import (
     BatchStocksRequest,
     BatchStocksResponse,
@@ -40,6 +42,7 @@ class StockController:
         self.service = StockService(
             repository=StockRepository(db),
             catalog_service=CatalogService(),
+            notifications_service=NotificationsService(),
         )
 
     def register_stock(
@@ -64,14 +67,22 @@ class StockController:
     def update_stock(
         self, product_id: UUID, payload: UpdateStockRequest
     ) -> StockResponse:
-        dto = UpdateStockDTO(product_id=product_id, quantity=payload.quantity)
+        dto = UpdateStockDTO(
+            product_id=product_id,
+            quantity=payload.quantity,
+            notification_metadata=_notification_metadata(payload),
+        )
         stock = self.service.update_stock(dto)
         return StockResponse(data=stock)
 
     def reserve_stock(
         self, product_id: UUID, payload: ReserveStockRequest
     ) -> StockResponse:
-        dto = ReserveStockDTO(product_id=product_id, quantity=payload.quantity)
+        dto = ReserveStockDTO(
+            product_id=product_id,
+            quantity=payload.quantity,
+            notification_metadata=_notification_metadata(payload),
+        )
         stock = self.service.reserve_stock(dto)
         return StockResponse(data=stock)
 
@@ -86,10 +97,7 @@ class StockController:
         self, payload: list[BatchStockChangeRequest]
     ) -> BatchStocksResponse:
         dto = BatchStockQuantityRequestDTO(
-            items=[
-                StockQuantityRequestDTO(product_id=item.product_id, quantity=item.quantity)
-                for item in payload
-            ]
+            items=[_stock_quantity_request_dto(item) for item in payload]
         )
         stocks = self.service.reserve_stocks(dto)
         return BatchStocksResponse(data={str(k): v for k, v in stocks.items()})
@@ -105,3 +113,26 @@ class StockController:
         )
         stocks = self.service.release_stocks(dto)
         return BatchStocksResponse(data={str(k): v for k, v in stocks.items()})
+
+
+def _notification_metadata(payload) -> StockNotificationMetadataDTO | None:
+    """Return notification metadata when both optional fields are present."""
+    seller_id = getattr(payload, "seller_id", None)
+    product_name = getattr(payload, "product_name", None)
+    if not seller_id or not product_name:
+        return None
+    return StockNotificationMetadataDTO(
+        seller_id=seller_id,
+        product_name=product_name,
+    )
+
+
+def _stock_quantity_request_dto(
+    item: BatchStockChangeRequest,
+) -> StockQuantityRequestDTO:
+    """Map a batch stock request item to its service DTO."""
+    return StockQuantityRequestDTO(
+        product_id=item.product_id,
+        quantity=item.quantity,
+        notification_metadata=_notification_metadata(item),
+    )

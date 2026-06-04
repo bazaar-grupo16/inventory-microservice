@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     APP_NAME: str = "inventory-service"
     LOG_LEVEL: str = "info"
     CATALOG_SERVICE_URL: str = ""
+    NOTIFICATIONS_SERVICE_URL: str = ""
+    LOW_STOCK_THRESHOLD: int = 5
 
     # ── Database ─────────────────────────────────────
     DB_HOST: str

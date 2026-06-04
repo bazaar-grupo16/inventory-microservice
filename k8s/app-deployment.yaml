@@ -34,6 +34,16 @@ spec:
                 secretKeyRef:
                   name: inventory-db-credentials
                   key: CATALOG_SERVICE_URL
+            - name: NOTIFICATIONS_SERVICE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: inventory-db-credentials
+                  key: NOTIFICATIONS_SERVICE_URL
+            - name: LOW_STOCK_THRESHOLD
+              valueFrom:
+                secretKeyRef:
+                  name: inventory-db-credentials
+                  key: LOW_STOCK_THRESHOLD
             - name: DB_HOST
               valueFrom:
                 secretKeyRef:

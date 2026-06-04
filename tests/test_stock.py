@@ -11,6 +11,9 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+import pytest
+
+from src.services.notifications import NotificationsService
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -207,6 +210,68 @@ class TestUpdateStock:
 
         assert response.status_code == 422
 
+    def test_notifies_low_stock_when_crossing_threshold(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls = []
+        pid, _ = register(client, quantity=10)
+
+        def fake_notify_low_stock(self, **kwargs):
+            calls.append(kwargs)
+
+        monkeypatch.setattr(
+            NotificationsService,
+            "notify_low_stock",
+            fake_notify_low_stock,
+        )
+
+        response = client.put(
+            f"/internal/products/{pid}/stock",
+            json={
+                "quantity": 3,
+                "seller_id": "seller-123",
+                "product_name": "Auriculares",
+            },
+        )
+
+        assert response.status_code == 200
+        assert calls == [
+            {
+                "seller_id": "seller-123",
+                "product_id": pid,
+                "product_name": "Auriculares",
+                "current_stock": 3,
+                "threshold": 5,
+            }
+        ]
+
+    def test_does_not_notify_low_stock_without_metadata(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls = []
+        pid, _ = register(client, quantity=10)
+
+        def fake_notify_low_stock(self, **kwargs):
+            calls.append(kwargs)
+
+        monkeypatch.setattr(
+            NotificationsService,
+            "notify_low_stock",
+            fake_notify_low_stock,
+        )
+
+        response = client.put(
+            f"/internal/products/{pid}/stock",
+            json={"quantity": 3},
+        )
+
+        assert response.status_code == 200
+        assert calls == []
+
 
 # ── POST /internal/products/{id}/stock/reserve ───────────────────────────────
 
@@ -290,6 +355,69 @@ class TestReserveStock:
         response = client.get(f"/internal/products/{pid}/stock")
 
         assert response.json()["data"]["quantity"] == 2
+
+    def test_notifies_out_of_stock_when_crossing_to_zero(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls = []
+        pid, _ = register(client, quantity=5)
+
+        def fake_notify_out_of_stock(self, **kwargs):
+            calls.append(kwargs)
+
+        monkeypatch.setattr(
+            NotificationsService,
+            "notify_out_of_stock",
+            fake_notify_out_of_stock,
+        )
+
+        response = client.post(
+            f"/internal/products/{pid}/stock/reserve",
+            json={
+                "quantity": 5,
+                "seller_id": "seller-123",
+                "product_name": "Auriculares",
+            },
+        )
+
+        assert response.status_code == 200
+        assert calls == [
+            {
+                "seller_id": "seller-123",
+                "product_id": pid,
+                "product_name": "Auriculares",
+            }
+        ]
+
+    def test_notifications_failure_does_not_break_stock_update(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        pid, _ = register(client, quantity=10)
+
+        def fake_notify_low_stock(self, **kwargs):
+            raise RuntimeError("notifications unavailable")
+
+        monkeypatch.setattr(
+            NotificationsService,
+            "notify_low_stock",
+            fake_notify_low_stock,
+        )
+
+        response = client.post(
+            f"/internal/products/{pid}/stock/reserve",
+            json={
+                "quantity": 7,
+                "seller_id": "seller-123",
+                "product_name": "Auriculares",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["quantity"] == 3
 
 
 # ── POST /internal/products/{id}/stock/release ───────────────────────────────
