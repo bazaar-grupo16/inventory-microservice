@@ -97,6 +97,37 @@ http://catalog-service
 
 Ese valor apunta al `Service` interno de catalog en `bazaar-dev` y se usa solo para tráfico interno entre microservicios. No debe reemplazarse por una URL pública de Ingress o gateway.
 
+`NOTIFICATIONS_SERVICE_URL` define la URL base interna de `notifications-service`
+para avisar al vendedor cuando el stock queda bajo o en cero. En Kubernetes, el
+valor esperado es:
+
+```txt
+http://notifications-service
+```
+
+`LOW_STOCK_THRESHOLD` configura el umbral de stock bajo, por defecto `5`.
+
+Las llamadas a notifications son best-effort: si fallan por timeout, error 5xx o
+servicio no disponible, inventory registra el error pero no rompe la reserva ni
+la actualización de stock.
+
+Para poder notificar al vendedor, las reservas batch deben recibir metadata de
+producto cuando esté disponible:
+
+```json
+{
+  "product_id": "uuid",
+  "quantity": 1,
+  "seller_id": "uuid",
+  "product_name": "Nombre del producto"
+}
+```
+
+Con esa metadata, inventory emite:
+
+- `low_stock`: cuando el stock cruza desde `>= LOW_STOCK_THRESHOLD` hacia un valor menor.
+- `out_of_stock`: cuando el stock cruza desde `> 0` hacia `0`.
+
 ## Endpoints
 
 ### Health
@@ -227,13 +258,16 @@ Reserva stock de varios productos en una sola llamada y falla de forma atómica 
 **Body JSON:**
 ```json
 [
-  { "product_id": "uuid-1", "quantity": 3 },
-  { "product_id": "uuid-2", "quantity": 1 }
+  { "product_id": "uuid-1", "quantity": 3, "seller_id": "uuid", "product_name": "Producto A" },
+  { "product_id": "uuid-2", "quantity": 1, "seller_id": "uuid", "product_name": "Producto B" }
 ]
 ```
 
 **Respuesta `200`:** stock resultante por producto.  
 **Respuesta `409`:** si alguno de los productos no tiene stock suficiente.
+
+`seller_id` y `product_name` son opcionales para conservar compatibilidad, pero
+son necesarios para generar notificaciones de stock al vendedor.
 
 ---
 
