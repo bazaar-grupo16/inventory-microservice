@@ -11,6 +11,9 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+import pytest
+
+from src.services.notifications import NotificationsService
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -207,6 +210,68 @@ class TestUpdateStock:
 
         assert response.status_code == 422
 
+    def test_notifies_low_stock_when_crossing_threshold(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls = []
+        pid, _ = register(client, quantity=10)
+
+        def fake_notify_low_stock(self, **kwargs):
+            calls.append(kwargs)
+
+        monkeypatch.setattr(
+            NotificationsService,
+            "notify_low_stock",
+            fake_notify_low_stock,
+        )
+
+        response = client.put(
+            f"/internal/products/{pid}/stock",
+            json={
+                "quantity": 3,
+                "seller_id": "seller-123",
+                "product_name": "Auriculares",
+            },
+        )
+
+        assert response.status_code == 200
+        assert calls == [
+            {
+                "seller_id": "seller-123",
+                "product_id": pid,
+                "product_name": "Auriculares",
+                "current_stock": 3,
+                "threshold": 5,
+            }
+        ]
+
+    def test_does_not_notify_low_stock_without_metadata(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls = []
+        pid, _ = register(client, quantity=10)
+
+        def fake_notify_low_stock(self, **kwargs):
+            calls.append(kwargs)
+
+        monkeypatch.setattr(
+            NotificationsService,
+            "notify_low_stock",
+            fake_notify_low_stock,
+        )
+
+        response = client.put(
+            f"/internal/products/{pid}/stock",
+            json={"quantity": 3},
+        )
+
+        assert response.status_code == 200
+        assert calls == []
+
 
 # ── POST /internal/products/{id}/stock/reserve ───────────────────────────────
 
@@ -291,6 +356,69 @@ class TestReserveStock:
 
         assert response.json()["data"]["quantity"] == 2
 
+    def test_notifies_out_of_stock_when_crossing_to_zero(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls = []
+        pid, _ = register(client, quantity=5)
+
+        def fake_notify_out_of_stock(self, **kwargs):
+            calls.append(kwargs)
+
+        monkeypatch.setattr(
+            NotificationsService,
+            "notify_out_of_stock",
+            fake_notify_out_of_stock,
+        )
+
+        response = client.post(
+            f"/internal/products/{pid}/stock/reserve",
+            json={
+                "quantity": 5,
+                "seller_id": "seller-123",
+                "product_name": "Auriculares",
+            },
+        )
+
+        assert response.status_code == 200
+        assert calls == [
+            {
+                "seller_id": "seller-123",
+                "product_id": pid,
+                "product_name": "Auriculares",
+            }
+        ]
+
+    def test_notifications_failure_does_not_break_stock_update(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        pid, _ = register(client, quantity=10)
+
+        def fake_notify_low_stock(self, **kwargs):
+            raise RuntimeError("notifications unavailable")
+
+        monkeypatch.setattr(
+            NotificationsService,
+            "notify_low_stock",
+            fake_notify_low_stock,
+        )
+
+        response = client.post(
+            f"/internal/products/{pid}/stock/reserve",
+            json={
+                "quantity": 7,
+                "seller_id": "seller-123",
+                "product_name": "Auriculares",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["quantity"] == 3
+
 
 # ── POST /internal/products/{id}/stock/release ───────────────────────────────
 
@@ -342,6 +470,112 @@ class TestReleaseStock:
         response = client.post(
             f"/internal/products/{pid}/stock/release",
             json={"quantity": 0},
+        )
+
+        assert response.status_code == 422
+
+
+# ── POST /internal/products/stock/reserve ────────────────────────────────────
+
+
+class TestBatchReserveStock:
+    """Atomic batch reservation for checkout flows."""
+
+    def test_reserves_multiple_products_atomically(self, client: TestClient) -> None:
+        pid_a, _ = register(client, quantity=10)
+        pid_b, _ = register(client, quantity=4)
+
+        response = client.post(
+            "/internal/products/stock/reserve",
+            json=[
+                {"product_id": str(pid_a), "quantity": 3},
+                {"product_id": str(pid_b), "quantity": 4},
+            ],
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data[str(pid_a)] == 7
+        assert data[str(pid_b)] == 0
+
+    def test_fails_and_reports_all_out_of_stock_products(
+        self, client: TestClient
+    ) -> None:
+        pid_a, _ = register(client, quantity=2)
+        pid_b, _ = register(client, quantity=1)
+
+        response = client.post(
+            "/internal/products/stock/reserve",
+            json=[
+                {"product_id": str(pid_a), "quantity": 1},
+                {"product_id": str(pid_b), "quantity": 3},
+                {"product_id": str(uuid4()), "quantity": 2},
+            ],
+        )
+
+        assert response.status_code == 409
+        body = response.json()
+        assert body["type"] == "about:blank"
+        assert body["title"] == "Insufficient Stock"
+        assert body["status"] == 409
+        assert str(pid_b) in body["detail"]
+        assert body["instance"] == "/internal/products/stock/reserve"
+
+    def test_batch_reserve_is_atomic_on_failure(self, client: TestClient) -> None:
+        pid_a, _ = register(client, quantity=5)
+        pid_b, _ = register(client, quantity=2)
+
+        response = client.post(
+            "/internal/products/stock/reserve",
+            json=[
+                {"product_id": str(pid_a), "quantity": 3},
+                {"product_id": str(pid_b), "quantity": 5},
+            ],
+        )
+
+        assert response.status_code == 409
+
+        stock_a = client.get(f"/internal/products/{pid_a}/stock")
+        stock_b = client.get(f"/internal/products/{pid_b}/stock")
+        assert stock_a.json()["data"]["quantity"] == 5
+        assert stock_b.json()["data"]["quantity"] == 2
+
+
+# ── POST /internal/products/stock/release ────────────────────────────────────
+
+
+class TestBatchReleaseStock:
+    """Restore reserved stock for multiple products."""
+
+    def test_releases_multiple_products(self, client: TestClient) -> None:
+        pid_a, _ = register(client, quantity=10)
+        pid_b, _ = register(client, quantity=6)
+        client.post(
+            f"/internal/products/{pid_a}/stock/reserve",
+            json={"quantity": 4},
+        )
+        client.post(
+            f"/internal/products/{pid_b}/stock/reserve",
+            json={"quantity": 2},
+        )
+
+        response = client.post(
+            "/internal/products/stock/release",
+            json=[
+                {"product_id": str(pid_a), "quantity": 3},
+                {"product_id": str(pid_b), "quantity": 2},
+            ],
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data[str(pid_a)] == 9
+        assert data[str(pid_b)] == 6
+
+    def test_rejects_empty_batch(self, client: TestClient) -> None:
+        response = client.post(
+            "/internal/products/stock/release",
+            json=[],
         )
 
         assert response.status_code == 422

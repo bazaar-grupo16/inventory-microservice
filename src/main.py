@@ -20,11 +20,15 @@ from src.api.routers.stock import router as stock_router
 from src.core.config import get_settings
 from src.core.database import Base, engine, wait_for_db
 from src.core.logging import setup_logging
+from src.core.observability import CorrelationIdMiddleware
+from src.core.telemetry import initialize_prometheus_metrics, router as metrics_router
 from src.models import Stock  # noqa: F401
 
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+initialize_prometheus_metrics()
 
 
 @asynccontextmanager
@@ -48,6 +52,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+app.add_middleware(CorrelationIdMiddleware)
 
 
 @app.middleware("http")
@@ -69,6 +74,7 @@ async def logging_middleware(request: Request, call_next) -> Response:  # type: 
 # ── Routers ──────────────────────────────────────────
 app.include_router(health_router)
 app.include_router(stock_router)
+app.include_router(metrics_router)
 
 # ── Exception handlers ────────────────────────────────
 register_exception_handlers(app)

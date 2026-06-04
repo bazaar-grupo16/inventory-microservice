@@ -220,6 +220,40 @@ Restaura unidades previamente reservadas (se usa al cancelar una orden).
 
 ---
 
+#### `POST /internal/products/stock/reserve` — Reservar stock batch
+
+Reserva stock de varios productos en una sola llamada y falla de forma atómica si alguno no tiene stock suficiente.
+
+**Body JSON:**
+```json
+[
+  { "product_id": "uuid-1", "quantity": 3 },
+  { "product_id": "uuid-2", "quantity": 1 }
+]
+```
+
+**Respuesta `200`:** stock resultante por producto.  
+**Respuesta `409`:** si alguno de los productos no tiene stock suficiente.
+
+---
+
+#### `POST /internal/products/stock/release` — Liberar stock batch
+
+Restaura stock reservado para varios productos en una sola llamada.
+
+**Body JSON:**
+```json
+[
+  { "product_id": "uuid-1", "quantity": 3 },
+  { "product_id": "uuid-2", "quantity": 1 }
+]
+```
+
+**Respuesta `200`:** stock resultante por producto.  
+**Respuesta `404`:** si alguna entrada de stock no existe.
+
+---
+
 ### Formato de errores
 
 Todos los errores de dominio siguen [RFC 7807 Problem Details](https://www.rfc-editor.org/rfc/rfc7807) con `Content-Type: application/problem+json`:

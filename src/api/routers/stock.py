@@ -5,9 +5,10 @@ All routes are under /internal/products — this service is NOT exposed
 through the public gateway.
 """
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Body, Response
 
 from src.api.controllers.stock import StockController
 from src.core.dependencies import DbSession
@@ -15,6 +16,7 @@ from src.schemas.error import ErrorResponse
 from src.schemas.stock import (
     BatchStocksRequest,
     BatchStocksResponse,
+    BatchStockChangeRequest,
     RegisterStockRequest,
     ReleaseStockRequest,
     ReserveStockRequest,
@@ -135,3 +137,32 @@ def release_stock(
     db: DbSession,
 ) -> StockResponse:
     return StockController(db).release_stock(id, payload)
+
+
+@router.post(
+    "/stock/reserve",
+    response_model=BatchStocksResponse,
+    summary="Reserve stock in batch",
+    description="Atomically reserve stock for multiple products in one call.",
+    responses={
+        409: {"description": "Insufficient stock", "model": ErrorResponse},
+    },
+)
+def reserve_stocks(
+    payload: Annotated[list[BatchStockChangeRequest], Body(min_length=1)],
+    db: DbSession,
+) -> BatchStocksResponse:
+    return StockController(db).reserve_stocks(payload)
+
+
+@router.post(
+    "/stock/release",
+    response_model=BatchStocksResponse,
+    summary="Release stock in batch",
+    description="Restore reserved stock for multiple products in one call.",
+)
+def release_stocks(
+    payload: Annotated[list[BatchStockChangeRequest], Body(min_length=1)],
+    db: DbSession,
+) -> BatchStocksResponse:
+    return StockController(db).release_stocks(payload)

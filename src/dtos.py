@@ -13,6 +13,12 @@ from uuid import UUID
 
 
 @dataclass
+class StockNotificationMetadataDTO:
+    seller_id: str
+    product_name: str
+
+
+@dataclass
 class RegisterStockDTO:
     product_id: UUID
     quantity: int
@@ -22,18 +28,32 @@ class RegisterStockDTO:
 class UpdateStockDTO:
     product_id: UUID
     quantity: int
+    notification_metadata: StockNotificationMetadataDTO | None = None
 
 
 @dataclass
 class ReserveStockDTO:
     product_id: UUID
     quantity: int
+    notification_metadata: StockNotificationMetadataDTO | None = None
 
 
 @dataclass
 class ReleaseStockDTO:
     product_id: UUID
     quantity: int
+
+
+@dataclass
+class StockQuantityRequestDTO:
+    product_id: UUID
+    quantity: int
+    notification_metadata: StockNotificationMetadataDTO | None = None
+
+
+@dataclass
+class BatchStockQuantityRequestDTO:
+    items: list[StockQuantityRequestDTO]
 
 
 @dataclass

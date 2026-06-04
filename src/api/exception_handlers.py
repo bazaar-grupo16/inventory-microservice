@@ -9,7 +9,12 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from src.exceptions.stock import InsufficientStock, StockNotFound
+from src.exceptions.stock import (
+    BatchInsufficientStock,
+    BatchStockNotFound,
+    InsufficientStock,
+    StockNotFound,
+)
 
 
 def _problem(
@@ -54,4 +59,31 @@ def register_exception_handlers(app: FastAPI) -> None:
             409,
             "Insufficient Stock",
             f"Product {exc.product_id} has only {exc.available} units available.",
+        )
+
+    @app.exception_handler(BatchInsufficientStock)
+    async def batch_insufficient_stock_handler(
+        request: Request, exc: BatchInsufficientStock
+    ) -> JSONResponse:
+        detail = "; ".join(
+            f"{issue.product_id} requested {issue.requested}, available {issue.available}"
+            for issue in exc.issues
+        )
+        return _problem(
+            request,
+            409,
+            "Insufficient Stock",
+            f"Products out of stock: {detail}",
+        )
+
+    @app.exception_handler(BatchStockNotFound)
+    async def batch_stock_not_found_handler(
+        request: Request, exc: BatchStockNotFound
+    ) -> JSONResponse:
+        product_ids = ", ".join(str(product_id) for product_id in exc.product_ids)
+        return _problem(
+            request,
+            404,
+            "Not Found",
+            f"Stock entries not found for products: {product_ids}",
         )

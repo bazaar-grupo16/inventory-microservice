@@ -28,14 +28,25 @@ class RegisterStockRequest(BaseModel):
 
 class UpdateStockRequest(BaseModel):
     quantity: int = Field(ge=0)
+    seller_id: str | None = None
+    product_name: str | None = None
 
 
 class ReserveStockRequest(BaseModel):
     quantity: int = Field(ge=1)
+    seller_id: str | None = None
+    product_name: str | None = None
 
 
 class ReleaseStockRequest(BaseModel):
     quantity: int = Field(ge=1)
+
+
+class BatchStockChangeRequest(BaseModel):
+    product_id: UUID
+    quantity: int = Field(ge=1)
+    seller_id: str | None = None
+    product_name: str | None = None
 
 
 class BatchStocksRequest(BaseModel):
