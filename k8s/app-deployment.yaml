@@ -69,6 +69,10 @@ spec:
                 secretKeyRef:
                   name: inventory-db-credentials
                   key: DB_NAME
+            - name: CLEANUP_INTERVAL_SECONDS
+              value: "60"
+            - name: RESERVATION_TTL_MINUTES
+              value: "32"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://otel-collector:4317"
             - name: OTEL_EXPORTER_OTLP_PROTOCOL
