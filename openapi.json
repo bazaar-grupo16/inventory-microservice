@@ -483,7 +483,7 @@
             "application/json": {
               "schema": {
                 "items": {
-                  "$ref": "#/components/schemas/BatchStockChangeRequest"
+                  "$ref": "#/components/schemas/ReserveBatchItem"
                 },
                 "type": "array",
                 "minItems": 1,
@@ -549,12 +549,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "items": {
-                  "$ref": "#/components/schemas/BatchStockChangeRequest"
-                },
-                "type": "array",
-                "minItems": 1,
-                "title": "Payload"
+                "$ref": "#/components/schemas/ReleaseBatchRequest"
               }
             }
           },
@@ -593,30 +588,62 @@
           }
         }
       }
+    },
+    "/internal/products/stock/commit": {
+      "post": {
+        "tags": [
+          "Stock"
+        ],
+        "summary": "Commit stock in batch",
+        "description": "Finalize all reservations for a given order_id.",
+        "operationId": "commit_stocks_internal_products_stock_commit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitBatchResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Reservation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
-      "BatchStockChangeRequest": {
-        "properties": {
-          "product_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Product Id"
-          },
-          "quantity": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Quantity"
-          }
-        },
-        "type": "object",
-        "required": [
-          "product_id",
-          "quantity"
-        ],
-        "title": "BatchStockChangeRequest"
-      },
       "BatchStocksRequest": {
         "properties": {
           "product_ids": {
@@ -650,6 +677,55 @@
           "data"
         ],
         "title": "BatchStocksResponse"
+      },
+      "CommitBatchRequest": {
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Order Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_id"
+        ],
+        "title": "CommitBatchRequest"
+      },
+      "CommitBatchResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CommitBatchResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "CommitBatchResponse"
+      },
+      "CommitBatchResponseData": {
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Order Id"
+          },
+          "committed_products": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Committed Products"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_id",
+          "committed_products"
+        ],
+        "title": "CommitBatchResponseData"
       },
       "ErrorResponse": {
         "properties": {
@@ -711,19 +787,81 @@
         ],
         "title": "RegisterStockRequest"
       },
-      "ReleaseStockRequest": {
+      "ReleaseBatchRequest": {
         "properties": {
-          "quantity": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Quantity"
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Order Id"
           }
         },
         "type": "object",
         "required": [
-          "quantity"
+          "order_id"
+        ],
+        "title": "ReleaseBatchRequest"
+      },
+      "ReleaseStockRequest": {
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Order Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_id"
         ],
         "title": "ReleaseStockRequest"
+      },
+      "ReserveBatchItem": {
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Product Id"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Quantity"
+          },
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Order Id"
+          },
+          "seller_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seller Id"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "product_id",
+          "quantity",
+          "order_id"
+        ],
+        "title": "ReserveBatchItem"
       },
       "ReserveStockRequest": {
         "properties": {
@@ -731,11 +869,39 @@
             "type": "integer",
             "minimum": 1.0,
             "title": "Quantity"
+          },
+          "order_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Order Id"
+          },
+          "seller_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seller Id"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Name"
           }
         },
         "type": "object",
         "required": [
-          "quantity"
+          "quantity",
+          "order_id"
         ],
         "title": "ReserveStockRequest"
       },
@@ -782,6 +948,28 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Quantity"
+          },
+          "seller_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seller Id"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Name"
           }
         },
         "type": "object",

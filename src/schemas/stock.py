@@ -34,12 +34,13 @@ class UpdateStockRequest(BaseModel):
 
 class ReserveStockRequest(BaseModel):
     quantity: int = Field(ge=1)
+    order_id: UUID
     seller_id: str | None = None
     product_name: str | None = None
 
 
 class ReleaseStockRequest(BaseModel):
-    quantity: int = Field(ge=1)
+    order_id: UUID
 
 
 class BatchStockChangeRequest(BaseModel):
@@ -47,6 +48,31 @@ class BatchStockChangeRequest(BaseModel):
     quantity: int = Field(ge=1)
     seller_id: str | None = None
     product_name: str | None = None
+
+
+class ReserveBatchItem(BaseModel):
+    product_id: UUID
+    quantity: int = Field(ge=1)
+    order_id: UUID
+    seller_id: str | None = None
+    product_name: str | None = None
+
+
+class ReleaseBatchRequest(BaseModel):
+    order_id: UUID
+
+
+class CommitBatchRequest(BaseModel):
+    order_id: UUID
+
+
+class CommitBatchResponseData(BaseModel):
+    order_id: UUID
+    committed_products: list[UUID]
+
+
+class CommitBatchResponse(BaseModel):
+    data: CommitBatchResponseData
 
 
 class BatchStocksRequest(BaseModel):

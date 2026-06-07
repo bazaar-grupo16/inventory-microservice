@@ -13,19 +13,19 @@ from uuid import UUID
 
 from src.dtos import (
     BatchStocksDTO,
-    BatchStockQuantityRequestDTO,
     RegisterStockDTO,
     ReleaseStockDTO,
+    ReleaseBatchDTO,
+    CommitOrderDTO,
     ReserveStockDTO,
+    ReserveBatchItemDTO,
     StockQuantityRequestDTO,
     StockQuantityChangeDTO,
     StockNotificationMetadataDTO,
     UpdateStockDTO,
 )
 from src.exceptions.stock import (
-    BatchInsufficientStock,
     BatchStockIssue,
-    BatchStockNotFound,
     InsufficientStock,
     StockNotFound,
 )
@@ -88,7 +88,7 @@ class StockService:
 
     def reserve_stock(self, dto: ReserveStockDTO) -> Stock:
         """Atomically decrement stock; raise InsufficientStock if not possible."""
-        change = self.repository.reserve(dto.product_id, dto.quantity)
+        change = self.repository.reserve(dto.product_id, dto.quantity, dto.order_id)
         if change is None:
             # Could be not found or insufficient — distinguish for the caller.
             stock = self.repository.find_by_id(dto.product_id)
@@ -97,43 +97,35 @@ class StockService:
             raise InsufficientStock(dto.product_id, stock.quantity)
         stock = self.repository.find_by_id(dto.product_id)
         assert stock is not None  # just committed
-        self._notify_reserve_stock(change)
-        self._notify_stock_threshold_crossing(change, dto.notification_metadata)
+        if change.previous_quantity != change.new_quantity:
+            self._notify_reserve_stock(change)
+            self._notify_stock_threshold_crossing(change, dto.notification_metadata)
         return stock
 
     def release_stock(self, dto: ReleaseStockDTO) -> Stock:
         """Restore previously reserved stock (used on order cancellation)."""
+        change = self.repository.release(dto.product_id, dto.order_id)
+        if change is not None:
+            self._notify_release_stock(change)
         stock = self.repository.find_by_id(dto.product_id)
         if stock is None:
             raise StockNotFound(dto.product_id)
-        previous_quantity = stock.quantity
-        stock.quantity += dto.quantity
-        change = self.repository.save_with_previous_quantity(stock, previous_quantity)
-        self._notify_release_stock(change)
         return stock
 
-    def reserve_stocks(self, dto: BatchStockQuantityRequestDTO) -> dict[UUID, int]:
+    def reserve_stocks(self, items: list[ReserveBatchItemDTO]) -> dict[UUID, int]:
         """Atomically reserve stock for multiple products in one transaction."""
-        requested_quantities = self._collapse_requested_quantities(dto.items)
-        stocks = self.repository.find_by_ids_for_update(list(requested_quantities))
-        issues = self._collect_reservation_issues(requested_quantities, stocks)
-        if issues:
-            raise BatchInsufficientStock(issues)
-
-        stock_changes: list[tuple[Stock, int]] = []
-        for product_id, quantity in requested_quantities.items():
-            stock = stocks[product_id]
-            previous_quantity = stock.quantity
-            stock.quantity -= quantity
-            stock_changes.append((stock, previous_quantity))
-
-        changes = self.repository.save_many_with_previous_quantities(stock_changes)
+        if not items:
+            return {}
+        order_id = items[0].order_id
+        changes = self.repository.batch_reserve(order_id, items)
         metadata_by_product_id = {
             item.product_id: item.notification_metadata
-            for item in dto.items
+            for item in items
             if item.notification_metadata is not None
         }
         for change in changes:
+            if change.previous_quantity == change.new_quantity:
+                continue
             self._notify_reserve_stock(change)
             self._notify_stock_threshold_crossing(
                 change,
@@ -141,27 +133,16 @@ class StockService:
             )
         return {change.product_id: change.new_quantity for change in changes}
 
-    def release_stocks(self, dto: BatchStockQuantityRequestDTO) -> dict[UUID, int]:
+    def release_stocks(self, dto: ReleaseBatchDTO) -> dict[UUID, int]:
         """Restore reserved stock for multiple products in one transaction."""
-        requested_quantities = self._collapse_requested_quantities(dto.items)
-        stocks = self.repository.find_by_ids_for_update(list(requested_quantities))
-        missing_product_ids = [
-            product_id for product_id in requested_quantities if product_id not in stocks
-        ]
-        if missing_product_ids:
-            raise BatchStockNotFound(missing_product_ids)
-
-        stock_changes: list[tuple[Stock, int]] = []
-        for product_id, quantity in requested_quantities.items():
-            stock = stocks[product_id]
-            previous_quantity = stock.quantity
-            stock.quantity += quantity
-            stock_changes.append((stock, previous_quantity))
-
-        changes = self.repository.save_many_with_previous_quantities(stock_changes)
+        changes = self.repository.batch_release(dto.order_id)
         for change in changes:
             self._notify_release_stock(change)
         return {change.product_id: change.new_quantity for change in changes}
+
+    def commit_stocks(self, dto: CommitOrderDTO) -> list[UUID]:
+        """Commit all reservations for a given order_id."""
+        return self.repository.batch_commit(dto.order_id)
 
     def _notify_reserve_stock(self, change: StockQuantityChangeDTO) -> None:
         if change.new_quantity == 0:
@@ -222,7 +203,7 @@ class StockService:
             )
 
     def _collapse_requested_quantities(
-        self, items: list[StockQuantityRequestDTO]
+        self, items: list[ReserveBatchItemDTO] | list[StockQuantityRequestDTO]
     ) -> dict[UUID, int]:
         collapsed: dict[UUID, int] = {}
         for item in items:

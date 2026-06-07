@@ -14,6 +14,7 @@ from src.exceptions.stock import (
     BatchStockNotFound,
     InsufficientStock,
     StockNotFound,
+    ReservationNotFound,
 )
 
 
@@ -86,4 +87,15 @@ def register_exception_handlers(app: FastAPI) -> None:
             404,
             "Not Found",
             f"Stock entries not found for products: {product_ids}",
+        )
+
+    @app.exception_handler(ReservationNotFound)
+    async def reservation_not_found_handler(
+        request: Request, exc: ReservationNotFound
+    ) -> JSONResponse:
+        return _problem(
+            request,
+            404,
+            "Reservation Not Found",
+            f"No active reservations found for order {exc.order_id}",
         )
