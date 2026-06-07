@@ -14,7 +14,7 @@ from src.core.config import get_settings
 from src.core.utils import utc_now
 from src.dtos import StockQuantityChangeDTO, ReserveBatchItemDTO
 from src.models.stock import Stock
-from src.models.reservation import Reservation
+from src.models.reservation import Reservation, ReservationStatus
 from src.exceptions.stock import (
     StockNotFound,
     ReservationNotFound,
@@ -171,6 +171,7 @@ class StockRepository:
                 .where(
                     Reservation.order_id == order_id,
                     Reservation.product_id == product_id,
+                    Reservation.status != ReservationStatus.RELEASED.value
                 )
                 .with_for_update()
             )
@@ -192,8 +193,8 @@ class StockRepository:
             stock.quantity += res.quantity
             self.db.add(stock)
 
-            # Delete the reservation
-            self.db.delete(res)
+            res.status = ReservationStatus.RELEASED.value
+            self.db.add(res)
 
             self.db.commit()
 
@@ -307,7 +308,10 @@ class StockRepository:
             # First, fetch all reservations for this order, locked for update
             reservations = self.db.scalars(
                 select(Reservation)
-                .where(Reservation.order_id == order_id)
+                .where(
+                    Reservation.order_id == order_id,
+                    Reservation.status != ReservationStatus.RELEASED.value
+                )
                 .with_for_update()
             ).all()
             
@@ -333,8 +337,9 @@ class StockRepository:
                 stock.quantity += res.quantity
                 self.db.add(stock)
                 
-                self.db.delete(res)
-                
+                res.status = ReservationStatus.RELEASED.value
+                self.db.add(res)
+
                 changes.append(
                     StockQuantityChangeDTO(
                         product_id=res.product_id,
@@ -364,8 +369,9 @@ class StockRepository:
             product_ids = [res.product_id for res in reservations]
             
             for res in reservations:
-                self.db.delete(res)
-                
+                res.status = ReservationStatus.COMMITTED.value
+                self.db.add(res)
+
             self.db.commit()
             return product_ids
         except Exception:

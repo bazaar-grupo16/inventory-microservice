@@ -478,10 +478,10 @@ class TestReleaseStock:
         from sqlalchemy import text
         with engine.connect() as conn:
             count = conn.execute(
-                text("SELECT count(*) FROM reservations WHERE order_id = :order_id AND product_id = :product_id"),
+                text("SELECT count(*) FROM reservations WHERE order_id = :order_id AND product_id = :product_id AND status = 'RELEASED'"),
                 {"order_id": order_id, "product_id": pid}
             ).scalar()
-            assert count == 0
+            assert count == 1
 
     def test_release_is_idempotent(self, client: TestClient) -> None:
         pid, _ = register(client, quantity=10)
@@ -523,6 +523,75 @@ class TestReleaseStock:
         )
 
         assert response.status_code == 422
+
+    def test_release_single_product_in_multiple_product_order(self, client: TestClient) -> None:
+        pid_a, _ = register(client, quantity=10)
+        pid_b, _ = register(client, quantity=4)
+        order_id = uuid4()
+        client.post(
+            "/internal/products/stock/reserve",
+            json=[
+                {"product_id": str(pid_a), "quantity": 3, "order_id": str(order_id)},
+                {"product_id": str(pid_b), "quantity": 4, "order_id": str(order_id)},
+            ],
+        )
+        response_commit = client.post(
+            "/internal/products/stock/commit",
+            json={"order_id": str(order_id)},
+        )
+        assert response_commit.status_code == 200
+
+        response_a = client.post(
+            f"/internal/products/{pid_a}/stock/release",
+            json={"order_id": str(order_id)},
+        )
+        assert response_a.status_code == 200
+        assert response_a.json()["data"]["quantity"] == 10
+
+        # Check that stock B was not affected
+        response_b = client.get(f"/internal/products/{pid_b}/stock")
+        assert response_b.status_code == 200
+        assert response_b.json()["data"]["quantity"] == 0
+
+    def test_release_single_product_in_multiple_product_order_and_then_release_full_order(self, client: TestClient) -> None:
+        pid_a, _ = register(client, quantity=10)
+        pid_b, _ = register(client, quantity=4)
+        order_id = uuid4()
+        client.post(
+            "/internal/products/stock/reserve",
+            json=[
+                {"product_id": str(pid_a), "quantity": 3, "order_id": str(order_id)},
+                {"product_id": str(pid_b), "quantity": 4, "order_id": str(order_id)},
+            ],
+        )
+        response_commit = client.post(
+            "/internal/products/stock/commit",
+            json={"order_id": str(order_id)},
+        )
+        assert response_commit.status_code == 200
+
+        response_a = client.post(
+            f"/internal/products/{pid_a}/stock/release",
+            json={"order_id": str(order_id)},
+        )
+        assert response_a.status_code == 200
+        assert response_a.json()["data"]["quantity"] == 10
+
+        # Check that stock B was not affected
+        response_b = client.get(f"/internal/products/{pid_b}/stock")
+        assert response_b.status_code == 200
+        assert response_b.json()["data"]["quantity"] == 0
+
+        response_full_order = client.post(
+            "/internal/products/stock/release",
+            json={"order_id": str(order_id)},
+        )
+        assert response_full_order.status_code == 200
+
+        response_a = client.get(f"/internal/products/{pid_a}/stock")
+        assert response_a.json()["data"]["quantity"] == 10
+        response_b = client.get(f"/internal/products/{pid_b}/stock")
+        assert response_b.json()["data"]["quantity"] == 4
 
 
 # ── POST /internal/products/stock/reserve ────────────────────────────────────
@@ -796,15 +865,14 @@ class TestCommitStock:
         assert data["order_id"] == str(order_id)
         assert set(data["committed_products"]) == {str(pid_a), str(pid_b)}
 
-        # Reservations table has zero rows for that order_id
         from src.core.database import engine
         from sqlalchemy import text
         with engine.connect() as conn:
             count = conn.execute(
-                text("SELECT count(*) FROM reservations WHERE order_id = :order_id"),
+                text("SELECT count(*) FROM reservations WHERE order_id = :order_id AND status = 'COMMITTED'"),
                 {"order_id": order_id}
             ).scalar()
-            assert count == 0
+            assert count == 2
 
         # Stock quantity remains at the decremented values (7 and 3)
         stock_a = client.get(f"/internal/products/{pid_a}/stock").json()["data"]["quantity"]
@@ -1135,7 +1203,7 @@ class TestConcurrentStockReservation:
             futures = [executor.submit(make_request) for _ in range(2)]
             status_codes = [f.result() for f in futures]
 
-        assert sorted(status_codes) == [200, 404]
+        assert sorted(status_codes) == [200, 200]
 
     def test_concurrent_batch_commit_high_volume(self, client: TestClient) -> None:
         import concurrent.futures
@@ -1165,8 +1233,12 @@ class TestConcurrentStockReservation:
             futures = [executor.submit(make_request) for _ in range(num_requests)]
             status_codes = [f.result() for f in futures]
 
-        assert status_codes.count(200) == 1
-        assert status_codes.count(404) == num_requests - 1
+        assert status_codes.count(200) == num_requests
+
+        response = client.get(
+            f"/internal/products/{pid_a}/stock",
+        )
+        assert response.json()["data"]["quantity"] == 7
 
     def test_concurrent_batch_reserve_different_orders(self, client: TestClient) -> None:
         import concurrent.futures

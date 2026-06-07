@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.core.utils import utc_now
-from src.models.reservation import Reservation
+from src.models.reservation import Reservation, ReservationStatus
 from src.models.stock import Stock
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ def release_expired_reservations(db: Session) -> int:
             .where(
                 Reservation.expires_at.isnot(None),
                 Reservation.expires_at < utc_now(),
+                Reservation.status == ReservationStatus.PENDING.value
             )
             .with_for_update(skip_locked=True)
         )
