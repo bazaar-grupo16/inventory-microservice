@@ -7,6 +7,7 @@ ORM metadata (suitable for development; use Alembic migrations in
 production).
 """
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -17,8 +18,9 @@ from fastapi import FastAPI, Request, Response
 from src.api.exception_handlers import register_exception_handlers
 from src.api.health import router as health_router
 from src.api.routers.stock import router as stock_router
+from src.core.cleanup import start_cleanup_loop
 from src.core.config import get_settings
-from src.core.database import Base, engine, wait_for_db
+from src.core.database import Base, SessionLocal, engine, wait_for_db
 from src.core.logging import setup_logging
 from src.core.observability import CorrelationIdMiddleware
 from src.core.telemetry import initialize_prometheus_metrics, router as metrics_router
@@ -42,8 +44,22 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         )
     wait_for_db()
     Base.metadata.create_all(bind=engine)
+
+    cleanup_task = asyncio.create_task(
+        start_cleanup_loop(
+            interval_seconds=settings.CLEANUP_INTERVAL_SECONDS,
+            session_factory=SessionLocal,
+        )
+    )
+
     yield
+
     logger.info("Shutting down %s", settings.APP_NAME)
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(

@@ -4,11 +4,14 @@ Database queries for stock entities.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.core.config import get_settings
+from src.core.utils import utc_now
 from src.dtos import StockQuantityChangeDTO, ReserveBatchItemDTO
 from src.models.stock import Stock
 from src.models.reservation import Reservation
@@ -16,6 +19,8 @@ from src.exceptions.stock import (
     StockNotFound,
     ReservationNotFound,
 )
+
+settings = get_settings()
 
 
 class StockRepository:
@@ -267,6 +272,7 @@ class StockRepository:
 
             # If no issues, perform the decrements and inserts
             changes: list[StockQuantityChangeDTO] = []
+            expires_at = utc_now() + timedelta(minutes=settings.RESERVATION_TTL_MINUTES)
             for item in sorted_items:
                 stock = stocks_by_id[item.product_id]
                 previous_quantity = stock.quantity
@@ -277,7 +283,7 @@ class StockRepository:
                     order_id=order_id,
                     product_id=item.product_id,
                     quantity=item.quantity,
-                    expires_at=None,
+                    expires_at=expires_at,
                 )
                 self.db.add(reservation)
                 

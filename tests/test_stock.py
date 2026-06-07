@@ -13,6 +13,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 import pytest
 
+from src.core.cleanup import release_expired_reservations
 from src.services.notifications import NotificationsService
 
 
@@ -1299,3 +1300,119 @@ class TestConcurrentStockReservation:
             status_codes = [f.result() for f in futures]
 
         assert all(code == 200 for code in status_codes)
+
+
+@pytest.fixture
+def db():
+    from src.core.database import SessionLocal
+    with SessionLocal() as session:
+        yield session
+
+
+def setup_expired_reservation(client, db, product_id, order_id, quantity=10, reserve_qty=3, expired=True):
+    from datetime import timedelta
+    from sqlalchemy import select
+    from src.core.utils import utc_now
+    from src.models.reservation import Reservation
+
+    # Register stock via API
+    client.post(f"/internal/products/{product_id}/stock", json={"quantity": quantity})
+    # Reserve stock via API
+    client.post(
+        f"/internal/products/{product_id}/stock/reserve",
+        json={"quantity": reserve_qty, "order_id": str(order_id)},
+    )
+    
+    # Backdate or far-future the reservation
+    res = db.scalar(
+        select(Reservation)
+        .where(
+            Reservation.order_id == order_id,
+            Reservation.product_id == product_id,
+        )
+    )
+    if expired:
+        res.expires_at = utc_now() - timedelta(minutes=1)
+    else:
+        res.expires_at = utc_now() + timedelta(minutes=60)
+    db.add(res)
+    db.commit()
+
+
+class TestReservationCleanup:
+    """Tests for background reservation expiry and cleanup task."""
+
+    def test_expired_reservation_is_released(self, client, db):
+        from sqlalchemy import select
+        from src.models.stock import Stock
+        from src.models.reservation import Reservation
+
+        pid = uuid4()
+        oid = uuid4()
+        
+        # 1. Setup an expired reservation (quantity=10, reserved=3, expired=True)
+        setup_expired_reservation(client, db, pid, oid, quantity=10, reserve_qty=3, expired=True)
+        
+        # 2. Run cleanup
+        released = release_expired_reservations(db)
+        assert released == 1
+        
+        # 3. Assert reservation is gone
+        res_count = db.scalar(
+            select(Reservation)
+            .where(Reservation.order_id == oid, Reservation.product_id == pid)
+        )
+        assert res_count is None
+        
+        # 4. Assert stock is restored to 10
+        stock = db.scalar(select(Stock).where(Stock.product_id == pid))
+        assert stock.quantity == 10
+
+    def test_non_expired_reservation_is_not_released(self, client, db):
+        from sqlalchemy import select
+        from src.models.stock import Stock
+        from src.models.reservation import Reservation
+
+        pid = uuid4()
+        oid = uuid4()
+        
+        # 1. Setup a non-expired reservation (quantity=10, reserved=3, expired=False)
+        setup_expired_reservation(client, db, pid, oid, quantity=10, reserve_qty=3, expired=False)
+        
+        # 2. Run cleanup
+        released = release_expired_reservations(db)
+        assert released == 0
+        
+        # 3. Assert reservation still exists
+        res = db.scalar(
+            select(Reservation)
+            .where(Reservation.order_id == oid, Reservation.product_id == pid)
+        )
+        assert res is not None
+        assert res.quantity == 3
+        
+        # 4. Assert stock is still 7 (unchanged)
+        stock = db.scalar(select(Stock).where(Stock.product_id == pid))
+        assert stock.quantity == 7
+
+    def test_cleanup_is_idempotent(self, client, db):
+        from sqlalchemy import select
+        from src.models.stock import Stock
+
+        pid = uuid4()
+        oid = uuid4()
+        
+        # 1. Setup an expired reservation
+        setup_expired_reservation(client, db, pid, oid, quantity=10, reserve_qty=3, expired=True)
+        
+        # 2. Run cleanup first time
+        released_1 = release_expired_reservations(db)
+        assert released_1 == 1
+        
+        # 3. Run cleanup second time
+        released_2 = release_expired_reservations(db)
+        assert released_2 == 0
+        
+        # 4. Assert stock is restored to 10 (not 13 or something else)
+        stock = db.scalar(select(Stock).where(Stock.product_id == pid))
+        assert stock.quantity == 10
