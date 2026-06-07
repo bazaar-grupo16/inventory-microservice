@@ -16,12 +16,15 @@ from src.schemas.error import ErrorResponse
 from src.schemas.stock import (
     BatchStocksRequest,
     BatchStocksResponse,
-    BatchStockChangeRequest,
     RegisterStockRequest,
     ReleaseStockRequest,
+    ReleaseBatchRequest,
+    ReserveBatchItem,
     ReserveStockRequest,
     StockResponse,
     UpdateStockRequest,
+    CommitBatchRequest,
+    CommitBatchResponse,
 )
 
 
@@ -149,7 +152,7 @@ def release_stock(
     },
 )
 def reserve_stocks(
-    payload: Annotated[list[BatchStockChangeRequest], Body(min_length=1)],
+    payload: Annotated[list[ReserveBatchItem], Body(min_length=1)],
     db: DbSession,
 ) -> BatchStocksResponse:
     return StockController(db).reserve_stocks(payload)
@@ -162,7 +165,23 @@ def reserve_stocks(
     description="Restore reserved stock for multiple products in one call.",
 )
 def release_stocks(
-    payload: Annotated[list[BatchStockChangeRequest], Body(min_length=1)],
+    payload: ReleaseBatchRequest,
     db: DbSession,
 ) -> BatchStocksResponse:
     return StockController(db).release_stocks(payload)
+
+
+@router.post(
+    "/stock/commit",
+    response_model=CommitBatchResponse,
+    summary="Commit stock in batch",
+    description="Finalize all reservations for a given order_id.",
+    responses={
+        404: {"description": "Reservation not found", "model": ErrorResponse},
+    },
+)
+def commit_stocks(
+    payload: CommitBatchRequest,
+    db: DbSession,
+) -> CommitBatchResponse:
+    return StockController(db).commit_stocks(payload)

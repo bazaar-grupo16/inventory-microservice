@@ -35,13 +35,32 @@ class UpdateStockDTO:
 class ReserveStockDTO:
     product_id: UUID
     quantity: int
+    order_id: UUID
     notification_metadata: StockNotificationMetadataDTO | None = None
 
 
 @dataclass
 class ReleaseStockDTO:
     product_id: UUID
+    order_id: UUID
+
+
+@dataclass
+class ReserveBatchItemDTO:
+    product_id: UUID
     quantity: int
+    order_id: UUID
+    notification_metadata: StockNotificationMetadataDTO | None = None
+
+
+@dataclass
+class ReleaseBatchDTO:
+    order_id: UUID
+
+
+@dataclass
+class CommitOrderDTO:
+    order_id: UUID
 
 
 @dataclass

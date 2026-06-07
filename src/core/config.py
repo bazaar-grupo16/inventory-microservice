@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     CATALOG_SERVICE_URL: str = ""
     NOTIFICATIONS_SERVICE_URL: str = ""
     LOW_STOCK_THRESHOLD: int = 5
+    RESERVATION_TTL_MINUTES: int = 15
+    CLEANUP_INTERVAL_SECONDS: int = 60
 
     # ── Database ─────────────────────────────────────
     DB_HOST: str

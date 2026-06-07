@@ -50,3 +50,11 @@ class BatchStockNotFound(Exception):
         self.product_ids = product_ids
         summary = ", ".join(str(product_id) for product_id in product_ids)
         super().__init__(f"Stock entries not found for products: {summary}")
+
+
+class ReservationNotFound(Exception):
+    """Raised when attempting to commit a reservation that does not exist."""
+
+    def __init__(self, order_id: UUID) -> None:
+        self.order_id = order_id
+        super().__init__(f"No active reservations found for order {order_id}")
