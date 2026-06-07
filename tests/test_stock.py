@@ -692,3 +692,106 @@ class TestCatalogNotifications:
         assert response.status_code == 200
         assert response.json()["data"]["quantity"] == 0
         notify.assert_called_once_with(pid, has_stock=False)
+
+
+# ── Concurrency Tests ─────────────────────────────────────────────────────────
+
+
+class TestConcurrentStockReservation:
+    """Validate pessimistic locking and stock limits under concurrent requests."""
+
+    def test_concurrent_reservation_quantity_one(self, client: TestClient) -> None:
+        import concurrent.futures
+
+        pid, _ = register(client, quantity=1)
+
+        def make_request():
+            try:
+                response = client.post(
+                    f"/internal/products/{pid}/stock/reserve",
+                    json={"quantity": 1},
+                )
+                return response.status_code, response.json()
+            except Exception as e:
+                return 500, str(e)
+
+        # Launch two threads concurrently
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(make_request) for _ in range(2)]
+            results = [f.result() for f in futures]
+
+        status_codes = [r[0] for r in results]
+
+        # Exactly one should succeed (200), and one should fail (409)
+        assert 200 in status_codes
+        assert 409 in status_codes
+
+        # Verify final stock is 0
+        final_stock_res = client.get(f"/internal/products/{pid}/stock")
+        assert final_stock_res.json()["data"]["quantity"] == 0
+
+    def test_concurrent_reservation_quantity_not_negative(self, client: TestClient) -> None:
+        import concurrent.futures
+
+        pid, _ = register(client, quantity=1)
+
+        def make_request():
+            try:
+                response = client.post(
+                    f"/internal/products/{pid}/stock/reserve",
+                    json={"quantity": 1},
+                )
+                return response.status_code
+            except Exception:
+                return 500
+
+        # Launch 10 concurrent requests
+        num_requests = 10
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_requests) as executor:
+            futures = [executor.submit(make_request) for _ in range(num_requests)]
+            status_codes = [f.result() for f in futures]
+
+        # Exactly one should be 200, others 409
+        success_count = status_codes.count(200)
+        failure_count = status_codes.count(409)
+
+        assert success_count == 1
+        assert failure_count == num_requests - 1
+
+        # Final stock in DB must be exactly 0
+        final_stock_res = client.get(f"/internal/products/{pid}/stock")
+        final_quantity = final_stock_res.json()["data"]["quantity"]
+        assert final_quantity == 0
+
+    def test_concurrent_reservation_high_volume(self, client: TestClient) -> None:
+        import concurrent.futures
+
+        pid, _ = register(client, quantity=100)
+
+        def make_request():
+            try:
+                response = client.post(
+                    f"/internal/products/{pid}/stock/reserve",
+                    json={"quantity": 10},
+                )
+                return response.status_code
+            except Exception:
+                return 500
+
+        # Launch 100 concurrent requests
+        num_requests = 100
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_requests) as executor:
+            futures = [executor.submit(make_request) for _ in range(num_requests)]
+            status_codes = [f.result() for f in futures]
+
+        # Exactly 10 should be 200, others 409
+        success_count = status_codes.count(200)
+        failure_count = status_codes.count(409)
+
+        assert success_count == 10
+        assert failure_count == num_requests - 10
+
+        # Final stock in DB must be exactly 0
+        final_stock_res = client.get(f"/internal/products/{pid}/stock")
+        final_quantity = final_stock_res.json()["data"]["quantity"]
+        assert final_quantity == 0
